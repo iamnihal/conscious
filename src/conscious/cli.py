@@ -25,12 +25,14 @@ def cli():
 @click.option('--format', '-f', type=click.Choice(['text', 'json']), default='text', help='Output format')
 @click.option('--call-graph/--no-call-graph', default=True, help='Generate call graph analysis')
 @click.option('--impact-analysis', '-i', is_flag=True, help='Show impact analysis for changes')
-def analyze_changes(diff_file, output, format, call_graph, impact_analysis):
+@click.option('--cache/--no-cache', default=True, help='Enable caching for performance')
+@click.option('--cache-size', type=int, default=100, help='Maximum cache size (number of items)')
+def analyze_changes(diff_file, output, format, call_graph, impact_analysis, cache, cache_size):
     """Analyze changes in a diff file with call graph generation."""
     try:
         # Parse the diff
         console.print("🔍 Parsing diff...")
-        parser = DiffParser(str(diff_file))
+        parser = DiffParser(str(diff_file), cache_enabled=cache, cache_size=cache_size)
         diff_files = parser.parse()
 
         console.print(f"✅ Parsed {len(diff_files)} files")

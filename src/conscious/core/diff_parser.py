@@ -27,11 +27,92 @@ class DiffFile:
 class DiffParser:
     """Parses diffs using Difftastic for syntax-aware analysis."""
     
-    def __init__(self, diff_path: str, max_workers: Optional[int] = None):
+    def __init__(self, diff_path: str, max_workers: Optional[int] = None, cache_enabled: bool = True, cache_size: int = 100):
         self.diff_path = diff_path
         self.difft = DifftasticParser()
         self.max_workers = max_workers or os.cpu_count() or 4
-        
+
+        # Caching configuration
+        self.cache_enabled = cache_enabled
+        self.cache_size = cache_size
+
+        # Cache storage with LRU tracking
+        self._file_content_cache = {}  # Cache for extracted file contents
+        self._tree_cache = {}  # Cache for Tree-sitter parse trees
+        self._call_graph_cache = {}  # Cache for generated call graphs
+
+        # LRU tracking (simple implementation using insertion order)
+        self._cache_access_order = []
+
+        # Lazy-loaded components
+        self._tree_sitter = None
+        self._analyzer = None
+
+    @property
+    def tree_sitter(self):
+        """Lazy initialization of Tree-sitter parser."""
+        if self._tree_sitter is None:
+            self._tree_sitter = TreeSitterParser()
+        return self._tree_sitter
+
+    @property
+    def analyzer(self):
+        """Lazy initialization of call graph analyzer."""
+        if self._analyzer is None:
+            self._analyzer = CallGraphAnalyzer()
+        return self._analyzer
+
+    def _cache_get(self, cache_dict, key):
+        """Get item from cache with LRU tracking."""
+        if not self.cache_enabled:
+            return None
+
+        if key in cache_dict:
+            # Move to end for LRU (most recently used)
+            if key in self._cache_access_order:
+                self._cache_access_order.remove(key)
+            self._cache_access_order.append(key)
+            return cache_dict[key]
+        return None
+
+    def _cache_set(self, cache_dict, key, value):
+        """Set item in cache with LRU management."""
+        if not self.cache_enabled:
+            return
+
+        # Add to cache
+        cache_dict[key] = value
+
+        # Update LRU order
+        if key in self._cache_access_order:
+            self._cache_access_order.remove(key)
+        self._cache_access_order.append(key)
+
+        # Maintain cache size limit
+        while len(cache_dict) > self.cache_size:
+            # Remove least recently used item
+            oldest_key = self._cache_access_order.pop(0)
+            if oldest_key in cache_dict:
+                del cache_dict[oldest_key]
+
+    def clear_cache(self):
+        """Clear all caches."""
+        self._file_content_cache.clear()
+        self._tree_cache.clear()
+        self._call_graph_cache.clear()
+        self._cache_access_order.clear()
+
+    def get_cache_stats(self):
+        """Get cache statistics."""
+        return {
+            'file_content_cache': len(self._file_content_cache),
+            'tree_cache': len(self._tree_cache),
+            'call_graph_cache': len(self._call_graph_cache),
+            'total_cached_items': len(self._file_content_cache) + len(self._tree_cache) + len(self._call_graph_cache),
+            'cache_size_limit': self.cache_size,
+            'cache_enabled': self.cache_enabled
+        }
+
     def _extract_file_contents(self, file_path: str, raw_diff: str) -> tuple[str, str]:
         """Extract old and new contents of a file from the diff."""
         old_lines = []
@@ -201,30 +282,53 @@ class DiffParser:
             raise
 
     def generate_call_graphs(self, diff_files: List[DiffFile]) -> List[CallGraph]:
-        """Generate call graphs for the parsed diff files."""
+        """Generate call graphs for the parsed diff files with caching."""
         call_graphs = []
-        tree_sitter = TreeSitterParser()
-        analyzer = CallGraphAnalyzer()
 
         for diff_file in diff_files:
             try:
-                # Extract old and new content from the diff
-                old_content, new_content = self._extract_file_contents(diff_file.path, self._read_raw_diff())
+                # Create cache key for this file
+                cache_key = f"{diff_file.path}:{diff_file.language}"
+
+                # Check call graph cache first
+                cached_call_graph = self._cache_get(self._call_graph_cache, cache_key)
+                if cached_call_graph is not None:
+                    call_graphs.append(cached_call_graph)
+                    continue
+
+                # Extract old and new content from the diff (with caching)
+                content_cache_key = f"{diff_file.path}:content"
+                cached_content = self._cache_get(self._file_content_cache, content_cache_key)
+
+                if cached_content is not None:
+                    old_content, new_content = cached_content
+                else:
+                    old_content, new_content = self._extract_file_contents(diff_file.path, self._read_raw_diff())
+                    self._cache_set(self._file_content_cache, content_cache_key, (old_content, new_content))
 
                 # Use new content for call graph analysis (assuming we're analyzing current state)
                 if new_content.strip():
-                    # Parse with Tree-sitter
-                    tree = tree_sitter.parse_file(new_content, diff_file.language)
+                    # Check tree cache
+                    tree_cache_key = f"{diff_file.path}:{diff_file.language}:tree"
+                    cached_tree = self._cache_get(self._tree_cache, tree_cache_key)
+
+                    if cached_tree is not None:
+                        tree = cached_tree
+                    else:
+                        # Parse with Tree-sitter
+                        tree = self.tree_sitter.parse_file(new_content, diff_file.language)
+                        if tree is not None:
+                            self._cache_set(self._tree_cache, tree_cache_key, tree)
 
                     if tree is not None:
                         # Extract code elements
-                        functions = tree_sitter.get_functions(tree, diff_file.language)
-                        classes = tree_sitter.get_classes(tree, diff_file.language)
-                        calls = tree_sitter.get_calls(tree, diff_file.language)
-                        imports = tree_sitter.get_imports(tree, diff_file.language)
+                        functions = self.tree_sitter.get_functions(tree, diff_file.language)
+                        classes = self.tree_sitter.get_classes(tree, diff_file.language)
+                        calls = self.tree_sitter.get_calls(tree, diff_file.language)
+                        imports = self.tree_sitter.get_imports(tree, diff_file.language)
 
                         # Build call graph
-                        call_graph = analyzer.build_graph(
+                        call_graph = self.analyzer.build_graph(
                             functions=functions,
                             calls=calls,
                             classes=classes,
@@ -232,6 +336,9 @@ class DiffParser:
                             file_path=diff_file.path,
                             language=diff_file.language
                         )
+
+                        # Cache the call graph
+                        self._cache_set(self._call_graph_cache, cache_key, call_graph)
 
                         call_graphs.append(call_graph)
 
