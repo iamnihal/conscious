@@ -1,7 +1,7 @@
 """Change Classifier - Classifies semantic changes by type and impact."""
 
 from dataclasses import dataclass
-from typing import List, Dict, Optional, Set, Union
+from typing import List, Dict, Optional, Set, Union, Any
 from enum import Enum
 
 from .semantic_diff_parser import SemanticChange, ChangeType
@@ -36,7 +36,7 @@ class BreakingChange(Enum):
 @dataclass
 class ChangeClassification:
     """Classification result for a semantic change."""
-    element_mapping: ElementMapping
+    element_mapping: Any  # ElementMapping
     category: ChangeCategory
     severity: ImpactSeverity
     breaking_change: BreakingChange

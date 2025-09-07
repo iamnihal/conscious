@@ -42,7 +42,7 @@ class PropagationRule:
 @dataclass
 class ImpactPrediction:
     """Prediction of impact for a specific change."""
-    change_classification: ChangeClassification
+    change_classification: Any  # ChangeClassification
     propagated_severity: PropagationSeverity
     confidence_level: ConfidenceLevel
     confidence_score: float
@@ -251,82 +251,7 @@ class ConfidenceScorer:
             'test_coverage': 0.05
         }
 
-    def calculate_confidence(self, change_classification: ChangeClassification,
-                           usage_result: Optional[UsageResult] = None,
-                           dependency_depth: int = 0,
-                           test_coverage: float = 0.0) -> Tuple[float, ConfidenceLevel]:
-        """Calculate overall confidence score for an impact prediction."""
-
-        confidence_score = 0.0
-
-        # Semantic parsing quality
-        semantic_quality = self._assess_semantic_quality(change_classification)
-        confidence_score += semantic_quality * self.factors['semantic_parsing_quality']
-
-        # Usage analysis completeness
-        usage_completeness = self._assess_usage_completeness(usage_result)
-        confidence_score += usage_completeness * self.factors['usage_analysis_completeness']
-
-        # Dependency analysis depth
-        dependency_quality = min(dependency_depth / 5.0, 1.0)  # Normalize to 0-1
-        confidence_score += dependency_quality * self.factors['dependency_analysis_depth']
-
-        # Change type clarity
-        change_clarity = self._assess_change_clarity(change_classification)
-        confidence_score += change_clarity * self.factors['change_type_clarity']
-
-        # Test coverage
-        if test_coverage is not None:
-            confidence_score += test_coverage * self.factors['test_coverage']
-
-        # Historical patterns (simplified)
-        historical_factor = 0.7  # Could be improved with ML model
-        confidence_score += historical_factor * self.factors['historical_patterns']
-
-        # Convert to confidence level
-        if confidence_score >= 0.6:
-            confidence_level = ConfidenceLevel.HIGH
-        elif confidence_score >= 0.4:
-            confidence_level = ConfidenceLevel.MEDIUM
-        elif confidence_score >= 0.2:
-            confidence_level = ConfidenceLevel.LOW
-        else:
-            confidence_level = ConfidenceLevel.UNCERTAIN
-
-        return confidence_score, confidence_level
-
-    def _assess_semantic_quality(self, change_classification: ChangeClassification) -> float:
-        """Assess quality of semantic change parsing."""
-        # Higher confidence for well-defined changes
-        if change_classification.category == ChangeCategory.SIGNATURE_CHANGE:
-            return 0.9
-        elif change_classification.category == ChangeCategory.STRUCTURE_CHANGE:
-            return 0.85
-        elif change_classification.category == ChangeCategory.LOGIC_CHANGE:
-            return 0.7
-        else:
-            return 0.6
-
-    def _assess_usage_completeness(self, usage_result: Optional[UsageResult]) -> float:
-        """Assess completeness of usage analysis."""
-        if not usage_result:
-            return 0.3
-
-        # Higher confidence with more usage data
-        files_coverage = min(usage_result.unique_files / 10.0, 1.0)  # Normalize
-        total_usages = min(usage_result.total_usages / 50.0, 1.0)   # Normalize
-
-        return (files_coverage + total_usages) / 2.0
-
-    def _assess_change_clarity(self, change_classification: ChangeClassification) -> float:
-        """Assess clarity of the change type."""
-        # Clear breaking changes have higher confidence
-        if change_classification.breaking_change == BreakingChange.BREAKING:
-            return 0.9
-        elif change_classification.breaking_change == BreakingChange.NON_BREAKING:
-            return 0.8
-        else:
-            return 0.5
+# REMOVED: All heuristic assessment functions - Pure heuristic functions removed
 
 
 class ActionRecommender:
@@ -456,52 +381,29 @@ class ImpactPropagator:
                          usage_analysis: Optional[UsageAnalysis] = None,
                          impact_scope: Optional[ImpactScope] = None,
                          test_coverage: float = 0.0) -> ImpactAnalysisResult:
-        """Propagate impacts for a set of change classifications."""
+        """Propagate impacts - PURE FACTS ONLY. No heuristics, severity, or confidence calculations."""
 
         predictions = []
 
         for change_classification in change_classifications:
-            prediction = self._analyze_single_change(
-                change_classification, usage_analysis, test_coverage
+            # Create prediction with only factual data - no heuristic analysis
+            prediction = ImpactPrediction(
+                change_classification=change_classification,
+                affected_files=set(),  # Could be populated with actual usage data if available
+                affected_symbols=set(),  # Could be populated with actual usage data if available
+                propagation_rules=[]  # No rule-based propagation - pure facts only
             )
             predictions.append(prediction)
 
-        # Calculate overall assessment
-        overall_severity = self._calculate_overall_severity(predictions)
-        overall_confidence = self._calculate_overall_confidence(predictions)
-
-        # Aggregate statistics
-        total_affected_files = len(set().union(*[p.affected_files for p in predictions]))
-        total_affected_symbols = len(set().union(*[p.affected_symbols for p in predictions]))
-
-        severity_counts = self._count_severities(predictions)
-
-        # Generate risk assessment
-        risk_assessment = self._generate_risk_assessment(
-            predictions, impact_scope, overall_severity, overall_confidence
-        )
-
-        # Generate recommendations
-        if impact_scope:
-            recommendations = self.action_recommender.generate_recommendations(
-                predictions, impact_scope
-            )
-        else:
-            recommendations = {'general': ['Conduct full impact analysis with dependency tracking']}
+        # Calculate pure factual statistics only
+        total_affected_files = len(set().union(*[p.affected_files for p in predictions if p.affected_files]) if predictions else set())
+        total_affected_symbols = len(set().union(*[p.affected_symbols for p in predictions if p.affected_symbols]) if predictions else set())
 
         return ImpactAnalysisResult(
             predictions=predictions,
-            overall_severity=overall_severity,
-            overall_confidence=overall_confidence,
-            total_affected_files=total_affected_files,
-            total_affected_symbols=total_affected_symbols,
-            critical_changes=severity_counts.get(PropagationSeverity.CRITICAL, 0),
-            major_changes=severity_counts.get(PropagationSeverity.MAJOR, 0),
-            minor_changes=severity_counts.get(PropagationSeverity.MINOR, 0),
-            patch_changes=severity_counts.get(PropagationSeverity.PATCH, 0),
-            risk_assessment=risk_assessment,
-            deployment_recommendations=recommendations.get('deployment_strategy', []),
-            coordination_needed=recommendations.get('coordination_needed', [])
+            total_predictions=len(predictions),
+            unique_files_affected=total_affected_files,
+            unique_symbols_affected=total_affected_symbols
         )
 
     def _analyze_single_change(self, change_classification: ChangeClassification,
@@ -665,42 +567,4 @@ class ImpactPropagator:
                 counts.get(prediction.propagated_severity, 0) + 1
         return counts
 
-    def _generate_risk_assessment(self, predictions: List[ImpactPrediction],
-                                impact_scope: Optional[ImpactScope],
-                                overall_severity: PropagationSeverity,
-                                overall_confidence: ConfidenceLevel) -> str:
-        """Generate a comprehensive risk assessment."""
-
-        assessment_parts = []
-
-        # Severity assessment
-        if overall_severity == PropagationSeverity.CRITICAL:
-            assessment_parts.append("CRITICAL RISK: Breaking changes require emergency coordination")
-        elif overall_severity == PropagationSeverity.MAJOR:
-            assessment_parts.append("MAJOR RISK: Significant changes need careful coordination")
-        elif overall_severity == PropagationSeverity.MINOR:
-            assessment_parts.append("MINOR RISK: Small changes, standard deployment process")
-        else:
-            assessment_parts.append("LOW RISK: Safe changes, routine deployment")
-
-        # Confidence assessment
-        if overall_confidence == ConfidenceLevel.HIGH:
-            assessment_parts.append("High confidence in impact predictions")
-        elif overall_confidence == ConfidenceLevel.MEDIUM:
-            assessment_parts.append("Medium confidence - additional testing recommended")
-        elif overall_confidence == ConfidenceLevel.LOW:
-            assessment_parts.append("Low confidence - extensive testing required")
-        else:
-            assessment_parts.append("Uncertain impact - full analysis needed")
-
-        # Impact scope assessment
-        if impact_scope:
-            if impact_scope.total_impacts > 20:
-                assessment_parts.append("Large impact scope - phased deployment recommended")
-            elif impact_scope.total_impacts > 5:
-                assessment_parts.append("Moderate impact scope - coordinated deployment needed")
-
-            if impact_scope.impact_depth > 4:
-                assessment_parts.append("Deep impact propagation - detailed rollback plan required")
-
-        return " | ".join(assessment_parts)
+# REMOVED: _generate_risk_assessment - Pure heuristic function removed
