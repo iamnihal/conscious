@@ -102,9 +102,14 @@ class AdvancedImpactAnalyzer:
         try:
             # Phase 1: Parse semantic changes
             self._update_progress("semantic_parsing")
-            semantic_changes = self.semantic_parser.parse_semantic_changes(
-                diff_content, "diff_file"
-            )
+            # Parse semantic changes for each file in the diff
+            semantic_changes = []
+            for file_path in file_paths:
+                if file_path.endswith('.py'):
+                    file_changes = self.semantic_parser.parse_semantic_changes(
+                        diff_content, file_path
+                    )
+                    semantic_changes.extend(file_changes)
 
             # Phase 2: Map changes to elements
             self._update_progress("element_mapping")
@@ -115,9 +120,7 @@ class AdvancedImpactAnalyzer:
 
             # Phase 3: Classify changes
             self._update_progress("change_classification")
-            change_classifications = self.change_classifier.classify_changes(
-                [m.element_mapping for m in element_mappings]
-            )
+            change_classifications = self.change_classifier.classify_changes(element_mappings)
 
             # Phase 4: Build import graph
             self._update_progress("import_graph_building")
@@ -248,10 +251,14 @@ class AdvancedImpactAnalyzer:
 
         # Add impact propagation summary
         if impact_propagation:
+            total_impacts = (impact_propagation.critical_changes +
+                           impact_propagation.major_changes +
+                           impact_propagation.minor_changes +
+                           impact_propagation.patch_changes)
             summary.update({
                 'overall_severity': impact_propagation.overall_severity.value,
                 'overall_confidence': impact_propagation.overall_confidence.value,
-                'total_impacts': impact_propagation.total_impacts,
+                'total_impacts': total_impacts,
                 'risk_assessment': impact_propagation.risk_assessment
             })
 
