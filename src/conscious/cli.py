@@ -18,38 +18,34 @@ from .analyzers.advanced_impact_analyzer import ComprehensiveAnalysisResult
 install()
 console = Console()
 
-@click.group()
 def cli():
     """Conscious - Advanced Impact Analysis for Code Changes
 
     A comprehensive code change analyzer that understands the semantic impact
     of your changes across the entire codebase.
 
-    BASIC MODE: Traditional diff analysis with call graphs
-    ADVANCED MODE: AI-powered impact analysis with confidence scoring
+    USAGE:
+        conscious diff.patch                    # Analyze with advanced impact analysis
+        conscious diff.patch --basic           # Use basic analysis mode
+        conscious diff.patch --format json     # JSON output
+        conscious diff.patch --output report.html --format html  # HTML report
 
-    Examples:
-        # Basic analysis
-        conscious analyze-changes diff.patch
-
-        # Advanced impact analysis
-        conscious analyze-changes diff.patch --advanced --root-dir .
-
-        # Advanced with custom options
-        conscious analyze-changes diff.patch --advanced \\
-            --include-usage --include-dependencies \\
-            --analysis-depth 5 --confidence-threshold 0.8 \\
-            --format html --output report.html
+    FEATURES:
+    • Semantic change detection (function signatures, logic changes)
+    • Impact propagation with confidence scoring
+    • Dependency analysis and usage tracking
+    • Risk assessment and deployment recommendations
+    • Breaking change detection
     """
-    pass
+    analyze()
 
-@cli.command()
+@click.command()
 @click.argument('diff_file', type=click.Path(exists=True))
 @click.option('--output', '-o', type=click.Path(), help='Output file for analysis results')
 @click.option('--format', '-f', type=click.Choice(['text', 'json', 'html']), default='text', help='Output format')
 @click.option('--call-graph/--no-call-graph', default=True, help='Generate call graph analysis')
 @click.option('--impact-analysis', '-i', is_flag=True, help='Show impact analysis for changes')
-@click.option('--advanced/--basic', default=False, help='Use advanced impact analysis system')
+@click.option('--advanced/--basic', default=True, help='Use advanced impact analysis system (default: advanced)')
 @click.option('--include-usage/--no-usage', default=True, help='Include usage analysis (advanced mode only)')
 @click.option('--include-dependencies/--no-dependencies', default=True, help='Include dependency tracking (advanced mode only)')
 @click.option('--analysis-depth', type=int, default=3, help='Analysis depth for dependency tracking (advanced mode only)')
@@ -57,8 +53,8 @@ def cli():
 @click.option('--cache/--no-cache', default=True, help='Enable caching for performance')
 @click.option('--cache-size', type=int, default=100, help='Maximum cache size (number of items)')
 @click.option('--root-dir', type=click.Path(exists=True), help='Root directory for file resolution (advanced mode only)')
-def analyze_changes(diff_file, output, format, call_graph, impact_analysis, advanced, include_usage,
-                   include_dependencies, analysis_depth, confidence_threshold, cache, cache_size, root_dir):
+def analyze(diff_file, output, format, call_graph, impact_analysis, advanced, include_usage,
+            include_dependencies, analysis_depth, confidence_threshold, cache, cache_size, root_dir):
     """Analyze changes in a diff file with syntax-aware impact assessment.
 
     BASIC MODE (--basic):
@@ -81,18 +77,18 @@ def analyze_changes(diff_file, output, format, call_graph, impact_analysis, adva
 
         # Determine analysis mode
         if advanced:
-            return _analyze_changes_advanced(diff_file, output, format, include_usage,
-                                           include_dependencies, analysis_depth,
-                                           confidence_threshold, cache, cache_size, root_dir)
+            return _analyze_impact_advanced(diff_file, output, format, include_usage,
+                                          include_dependencies, analysis_depth,
+                                          confidence_threshold, cache, cache_size, root_dir)
         else:
-            return _analyze_changes_basic(diff_file, output, format, call_graph,
-                                        impact_analysis, cache, cache_size)
+            return _analyze_impact_basic(diff_file, output, format, call_graph,
+                                       impact_analysis, cache, cache_size)
 
     except Exception as e:
         console.print(f"[red]❌ Error:[/red] {str(e)}")
         raise click.Abort()
 
-def _analyze_changes_basic(diff_file, output, format, call_graph, impact_analysis, cache, cache_size):
+def _analyze_impact_basic(diff_file, output, format, call_graph, impact_analysis, cache, cache_size):
     """Basic analysis mode using the original call graph analyzer."""
     console.print("🔍 [bold]Basic Analysis Mode[/bold]")
     console.print("📄 Parsing diff...")
@@ -192,8 +188,8 @@ def _analyze_changes_basic(diff_file, output, format, call_graph, impact_analysi
     _output_results(results, format, output, diff_files)
     return results
 
-def _analyze_changes_advanced(diff_file, output, format, include_usage, include_dependencies,
-                            analysis_depth, confidence_threshold, cache, cache_size, root_dir):
+def _analyze_impact_advanced(diff_file, output, format, include_usage, include_dependencies,
+                             analysis_depth, confidence_threshold, cache, cache_size, root_dir):
     """Advanced analysis mode using the comprehensive impact analysis system."""
     console.print("🚀 [bold]Advanced Impact Analysis Mode[/bold]")
     console.print("🔬 Using comprehensive analysis system...")
