@@ -12,7 +12,7 @@ from .change_classifier import ChangeClassifier
 from .import_graph_builder import ImportGraphBuilder
 from .usage_analyzer import UsageAnalyzer
 from .dependency_tracker import DependencyTracker, ImpactScope
-from .impact_propagator import ImpactPropagator, ImpactAnalysisResult
+# REMOVED: ImpactPropagator - Pure heuristic logic removed
 
 
 @dataclass
@@ -64,7 +64,7 @@ class ComprehensiveAnalysisResult:
 
     # Impact analysis
     impact_scope: Optional[ImpactScope] = None
-    impact_propagation: Optional[ImpactAnalysisResult] = None
+# REMOVED: impact_propagation - Pure heuristic analysis removed
 
 
 class AdvancedImpactAnalyzer:
@@ -80,7 +80,7 @@ class AdvancedImpactAnalyzer:
         self.import_builder = ImportGraphBuilder()
         self.usage_analyzer = UsageAnalyzer()
         self.dependency_tracker = DependencyTracker()
-        self.impact_propagator = ImpactPropagator()
+# REMOVED: impact_propagator - Pure heuristic analysis removed
 
         # Analysis state
         self._progress = None
@@ -150,13 +150,7 @@ class AdvancedImpactAnalyzer:
                     changed_files, dependency_analysis
                 )
 
-            # Propagate impacts with confidence scoring
-            impact_propagation = self.impact_propagator.propagate_impacts(
-                change_classifications,
-                usage_analysis,
-                impact_scope,
-                self.config.test_coverage_data
-            )
+# REMOVED: Impact propagation - Pure heuristic analysis removed
 
             # Generate final result
             self._update_progress("finalizing")
@@ -168,11 +162,11 @@ class AdvancedImpactAnalyzer:
                 usage_analysis=usage_analysis,
                 dependency_analysis=dependency_analysis,
                 impact_scope=impact_scope,
-                impact_propagation=impact_propagation,
+# REMOVED: impact_propagation parameter - Pure heuristic analysis removed
                 configuration=self.config,
                 progress=self._progress,
                 analysis_summary=self._generate_analysis_summary(
-                    semantic_changes, change_classifications, impact_propagation
+                    semantic_changes, change_classifications
                 ),
                 performance_metrics=self._calculate_performance_metrics(start_time)
             )
@@ -218,8 +212,7 @@ class AdvancedImpactAnalyzer:
         return list(changed_files)
 
     def _generate_analysis_summary(self, semantic_changes: List[Any],
-                                 change_classifications: List[Any],
-                                 impact_propagation: Optional[ImpactAnalysisResult]) -> Dict[str, Any]:
+                                 change_classifications: List[Any]) -> Dict[str, Any]:
         """Generate comprehensive analysis summary."""
 
         summary = {
@@ -238,29 +231,9 @@ class AdvancedImpactAnalyzer:
             summary['change_types_breakdown'][change_type] = \
                 summary['change_types_breakdown'].get(change_type, 0) + 1
 
-            # Count severities
-            severity = classification.severity.value
-            summary['severity_breakdown'][severity] = \
-                summary['severity_breakdown'].get(severity, 0) + 1
+# REMOVED: Severity and breaking change classification - Pure heuristic logic removed
 
-            # Count breaking vs non-breaking
-            if classification.breaking_change.value == 'breaking':
-                summary['breaking_changes'] += 1
-            else:
-                summary['non_breaking_changes'] += 1
-
-        # Add impact propagation summary
-        if impact_propagation:
-            total_impacts = (impact_propagation.critical_changes +
-                           impact_propagation.major_changes +
-                           impact_propagation.minor_changes +
-                           impact_propagation.patch_changes)
-            summary.update({
-                'overall_severity': impact_propagation.overall_severity.value,
-                'overall_confidence': impact_propagation.overall_confidence.value,
-                'total_impacts': total_impacts,
-                'risk_assessment': impact_propagation.risk_assessment
-            })
+# REMOVED: Impact propagation summary - Pure heuristic analysis removed
 
         return summary
 

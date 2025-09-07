@@ -16,11 +16,7 @@ from .usage_analyzer import (
 from .dependency_tracker import (
     DependencyTracker, DependencyChain, DependencyMetrics, ImpactScope
 )
-from .impact_propagator import (
-    ImpactPropagator, ImpactPropagationRules, ConfidenceScorer, ActionRecommender,
-    ImpactPrediction, ImpactAnalysisResult, PropagationSeverity, ConfidenceLevel,
-    PropagationRule
-)
+# REMOVED: ImpactPropagator imports - Pure heuristic analysis removed
 from .advanced_impact_analyzer import (
     AdvancedImpactAnalyzer, AnalysisConfiguration, AnalysisProgress,
     ComprehensiveAnalysisResult
@@ -35,9 +31,7 @@ __all__ = [
     "ImportGraphBuilder", "ImportGraph", "ImportNode", "ImportEdge",
     "UsageAnalyzer", "UsageAnalysis", "UsageResult", "UsageLocation",
     "DependencyTracker", "DependencyChain", "DependencyMetrics", "ImpactScope",
-    "ImpactPropagator", "ImpactPropagationRules", "ConfidenceScorer", "ActionRecommender",
-    "ImpactPrediction", "ImpactAnalysisResult", "PropagationSeverity", "ConfidenceLevel",
-    "PropagationRule",
+# REMOVED: ImpactPropagator exports - Pure heuristic analysis removed
     "AdvancedImpactAnalyzer", "AnalysisConfiguration", "AnalysisProgress",
     "ComprehensiveAnalysisResult"
 ]

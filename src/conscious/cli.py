@@ -280,17 +280,7 @@ def _analyze_impact_advanced(diff_file, output, format, include_usage, include_d
         'performance': result.performance_metrics if result.performance_metrics else {},
         'semantic_changes': len(result.semantic_changes) if result.semantic_changes else 0,
         'change_classifications': len(result.change_classifications) if result.change_classifications else 0,
-        'impact_propagation': {
-            'overall_severity': result.impact_propagation.overall_severity.value if result.impact_propagation else None,
-            'overall_confidence': result.impact_propagation.overall_confidence.value if result.impact_propagation else None,
-            'critical_changes': result.impact_propagation.critical_changes if result.impact_propagation else 0,
-            'major_changes': result.impact_propagation.major_changes if result.impact_propagation else 0,
-            'minor_changes': result.impact_propagation.minor_changes if result.impact_propagation else 0,
-            'patch_changes': result.impact_propagation.patch_changes if result.impact_propagation else 0,
-            'risk_assessment': result.impact_propagation.risk_assessment if result.impact_propagation else None,
-            'deployment_recommendations': result.impact_propagation.deployment_recommendations if result.impact_propagation else [],
-            'coordination_needed': result.impact_propagation.coordination_needed if result.impact_propagation else []
-        } if result.impact_propagation else {},
+# REMOVED: impact_propagation section - Pure heuristic analysis removed
         'import_graph': {
             'nodes': len(result.import_graph.nodes) if result.import_graph else 0,
             'edges': len(result.import_graph.edges) if result.import_graph else 0
@@ -302,8 +292,117 @@ def _analyze_impact_advanced(diff_file, output, format, include_usage, include_d
     }
 
     # Output results
-    _output_advanced_results(result, format, output)
+    if format == 'json':
+        _output_pure_facts_json(result, output)
+    else:
+        _display_advanced_text_results(result)
     return result
+
+def _output_pure_facts_json(result: ComprehensiveAnalysisResult, output):
+    """Output pure factual data in JSON format for LLM consumption - NO heuristics or inferences."""
+    import time
+
+    # Extract ONLY pure facts - no severity levels, confidence scores, risk assessments, or recommendations
+    facts_data = {
+        "analysis_metadata": {
+            "tool_version": "2.0",
+            "timestamp": time.time(),
+            "analysis_type": "code_change_impact",
+            "processing_duration_ms": result.performance_metrics.get('total_analysis_time', 0) * 1000 if result.performance_metrics else 0
+        },
+
+        "observed_code_changes": {
+            "semantic_changes": [
+                {
+                    "change_type": change.change_type.value if hasattr(change.change_type, 'value') else str(change.change_type),
+                    "element_name": change.element_name,
+                    "file_path": getattr(change, 'file_path', None),
+                    "line_number": getattr(change, 'line_number', None),
+                    "old_content": change.old_content,
+                    "new_content": change.new_content
+                } for change in (result.semantic_changes or [])
+            ],
+
+            "code_elements_mapped": [
+                {
+                    "element_type": getattr(elem, 'element_type', 'unknown'),
+                    "name": getattr(elem, 'name', 'unknown'),
+                    "file_path": getattr(elem, 'file_path', None),
+                    "line_start": getattr(elem, 'start_line', None),
+                    "line_end": getattr(elem, 'end_line', None)
+                } for mapping in (result.element_mappings or [])
+                for elem in (mapping.mapped_elements or [])
+            ],
+
+            "change_categories": [
+                {
+                    "category": getattr(classification.category, 'value', str(classification.category)),
+                    "affected_elements": classification.affected_elements or []
+                } for classification in (result.change_classifications or [])
+            ]
+        },
+
+        "codebase_structure_observed": {
+            "files_processed": list(set(
+                [getattr(change, 'file_path', None) for change in (result.semantic_changes or []) if getattr(change, 'file_path', None)] +
+                [getattr(elem, 'file_path', None) for mapping in (result.element_mappings or []) for elem in (mapping.mapped_elements or []) if getattr(elem, 'file_path', None)]
+            )),
+
+            "import_statements_found": [
+                {
+                    "module_name": getattr(node, 'name', str(node)),
+                    "source_file": getattr(node, 'file_path', None),
+                    "import_type": "module_import"
+                } for node in (result.import_graph.nodes.values() if result.import_graph else [])
+            ] if result.import_graph else [],
+
+            "function_usage_locations": [
+                {
+                    "function_name": getattr(usage, 'function_name', 'unknown'),
+                    "usage_file": getattr(usage, 'file_path', None),
+                    "line_number": getattr(usage, 'line_number', None),
+                    "usage_context": getattr(usage, 'context', None)
+                } for usage in (result.usage_analysis.results if result.usage_analysis and hasattr(result.usage_analysis, 'results') else [])
+            ] if result.usage_analysis else []
+        },
+
+        "factual_impact_observations": {
+            "files_with_changes": list(set([
+                getattr(change, 'file_path', None)
+                for change in (result.semantic_changes or [])
+                if getattr(change, 'file_path', None)
+            ])),
+
+            "symbols_changed": list(set([
+                getattr(change, 'element_name', None)
+                for change in (result.semantic_changes or [])
+                if getattr(change, 'element_name', None)
+            ])),
+
+            "element_types_affected": list(set([
+                getattr(elem, 'element_type', 'unknown')
+                for mapping in (result.element_mappings or [])
+                for elem in (mapping.mapped_elements or [])
+            ]))
+        },
+
+        "quantitative_facts": {
+            "semantic_changes_count": len(result.semantic_changes) if result.semantic_changes else 0,
+            "code_elements_mapped_count": len(result.element_mappings) if result.element_mappings else 0,
+            "change_classifications_count": len(result.change_classifications) if result.change_classifications else 0,
+            "files_processed_count": len(result.import_graph.nodes) if result.import_graph else 0,
+            "function_usage_locations_count": len(result.usage_analysis.results) if result.usage_analysis and hasattr(result.usage_analysis, 'results') else 0
+        }
+    }
+
+    import json
+    json_output = json.dumps(facts_data, indent=2, default=str, ensure_ascii=False)
+
+    if output:
+        Path(output).write_text(json_output)
+        console.print(f"📄 Pure factual analysis saved to {output}")
+    else:
+        console.print(json_output)
 
 def _extract_file_paths_from_diff(diff_content: str) -> list:
     """Extract file paths from a diff content."""
@@ -350,18 +449,8 @@ def _output_advanced_results(result: ComprehensiveAnalysisResult, format, output
             'summary': result.analysis_summary,
             'performance': result.performance_metrics,
             'semantic_changes_count': len(result.semantic_changes),
-            'change_classifications_count': len(result.change_classifications),
-            'impact_propagation': {
-                'overall_severity': result.impact_propagation.overall_severity.value,
-                'overall_confidence': result.impact_propagation.overall_confidence.value,
-                'critical_changes': result.impact_propagation.critical_changes,
-                'major_changes': result.impact_propagation.major_changes,
-                'minor_changes': result.impact_propagation.minor_changes,
-                'patch_changes': result.impact_propagation.patch_changes,
-                'risk_assessment': result.impact_propagation.risk_assessment,
-                'deployment_recommendations': result.impact_propagation.deployment_recommendations,
-                'coordination_needed': result.impact_propagation.coordination_needed
-            } if result.impact_propagation else None
+            'change_classifications_count': len(result.change_classifications)
+            # REMOVED: impact_propagation section - Pure heuristic analysis removed
         }
 
         json_output = json.dumps(output_data, indent=2, default=str)
@@ -430,65 +519,41 @@ def _display_text_results(results, diff_files):
     console.print(f"\n✅ Analysis complete!")
 
 def _display_advanced_text_results(result: ComprehensiveAnalysisResult):
-    """Display advanced analysis results in text format using Rich."""
-    console.print(f"\n🚀 [bold]Advanced Impact Analysis Results[/bold]")
+    """Display advanced analysis results in text format using Rich - Pure Facts Only."""
+    console.print(f"\n🔬 [bold]Code Change Analysis - Pure Facts[/bold]")
     console.print("=" * 60)
 
-    # Executive Summary
-    console.print(f"\n📊 [bold]Executive Summary[/bold]")
-    summary = result.analysis_summary
-    if summary:
-        console.print(f"• Total Semantic Changes: {summary.get('total_semantic_changes', 0)}")
-        console.print(f"• Change Classifications: {summary.get('total_change_classifications', 0)}")
-        console.print(f"• Breaking Changes: {summary.get('breaking_changes', 0)}")
-        console.print(f"• Non-Breaking Changes: {summary.get('non_breaking_changes', 0)}")
+    # Raw Metrics
+    console.print(f"\n📊 [bold]Observed Facts[/bold]")
 
-        if 'overall_severity' in summary:
-            console.print(f"• Overall Severity: [bold]{summary['overall_severity']}[/bold]")
-            console.print(f"• Overall Confidence: [bold]{summary['overall_confidence']}[/bold]")
+    semantic_count = len(result.semantic_changes) if result.semantic_changes else 0
+    classification_count = len(result.change_classifications) if result.change_classifications else 0
+    mapping_count = len(result.element_mappings) if result.element_mappings else 0
+
+    console.print(f"• Semantic Changes Detected: {semantic_count}")
+    console.print(f"• Code Elements Mapped: {mapping_count}")
+    console.print(f"• Change Classifications: {classification_count}")
+
+# REMOVED: Impact propagation display - Pure heuristic analysis removed
 
     # Performance Metrics
     perf = result.performance_metrics
     if perf:
-        console.print(f"\n⚡ [bold]Performance Metrics[/bold]")
+        console.print(f"\n⚡ [bold]Analysis Performance[/bold]")
         console.print(".2f")
-        console.print(f"• Phases Completed: {perf.get('phases_completed', 0)}")
+        console.print(f"• Analysis Phases: {perf.get('phases_completed', 0)}")
 
-    # Impact Analysis
-    if result.impact_propagation:
-        console.print(f"\n🎯 [bold]Impact Analysis[/bold]")
-        prop = result.impact_propagation
-        console.print(f"• Critical Changes: [red]{prop.critical_changes}[/red]")
-        console.print(f"• Major Changes: [yellow]{prop.major_changes}[/yellow]")
-        console.print(f"• Minor Changes: [blue]{prop.minor_changes}[/blue]")
-        console.print(f"• Patch Changes: [green]{prop.patch_changes}[/green]")
-
-        if prop.risk_assessment:
-            console.print(f"\n🔍 [bold]Risk Assessment[/bold]")
-            console.print(f"{prop.risk_assessment}")
-
-        # Recommendations
-        if prop.deployment_recommendations:
-            console.print(f"\n🚀 [bold]Deployment Recommendations[/bold]")
-            for rec in prop.deployment_recommendations[:5]:  # Show first 5
-                console.print(f"• {rec}")
-            if len(prop.deployment_recommendations) > 5:
-                console.print(f"• ... and {len(prop.deployment_recommendations) - 5} more")
-
-        if prop.coordination_needed:
-            console.print(f"\n👥 [bold]Coordination Needed[/bold]")
-            for coord in prop.coordination_needed[:3]:  # Show first 3
-                console.print(f"• {coord}")
-            if len(prop.coordination_needed) > 3:
-                console.print(f"• ... and {len(prop.coordination_needed) - 3} more")
-
-    # Graph Analysis
+    # Code Structure Facts
     if result.import_graph:
-        console.print(f"\n🔗 [bold]Import Graph Analysis[/bold]")
-        console.print(f"• Graph Nodes: {len(result.import_graph.nodes)}")
-        console.print(f"• Graph Edges: {len(result.import_graph.edges)}")
+        console.print(f"\n🔗 [bold]Code Structure Observed[/bold]")
+        console.print(f"• Import Graph Nodes: {len(result.import_graph.nodes)}")
+        console.print(f"• Import Relationships: {len(result.import_graph.edges)}")
 
-    console.print(f"\n✅ [bold]Advanced Analysis Complete![/bold]")
+    if result.usage_analysis:
+        console.print(f"• Function Usage Locations: {len(result.usage_analysis.results) if hasattr(result.usage_analysis, 'results') else 0}")
+
+    console.print(f"\n✅ [bold]Factual Analysis Complete - Ready for LLM Processing[/bold]")
+    console.print(f"[dim]Use --format json for structured data suitable for LLM consumption[/dim]")
 
 def _generate_html_report(results):
     """Generate HTML report for basic analysis results."""
@@ -601,55 +666,13 @@ def _generate_advanced_html_report(result: ComprehensiveAnalysisResult):
             </div>
         </div>
 
-        {f'''
-        <div class="section">
-            <h2>🎯 Impact Severity Breakdown</h2>
-            <div class="metric-grid">
-                <div class="metric severity-critical">
-                    <div class="metric-label">Critical</div>
-                    <div class="metric-value large">{result.impact_propagation.critical_changes if result.impact_propagation else 0}</div>
-                </div>
-                <div class="metric severity-major">
-                    <div class="metric-label">Major</div>
-                    <div class="metric-value large">{result.impact_propagation.major_changes if result.impact_propagation else 0}</div>
-                </div>
-                <div class="metric severity-minor">
-                    <div class="metric-label">Minor</div>
-                    <div class="metric-value large">{result.impact_propagation.minor_changes if result.impact_propagation else 0}</div>
-                </div>
-                <div class="metric severity-patch">
-                    <div class="metric-label">Patch</div>
-                    <div class="metric-value large">{result.impact_propagation.patch_changes if result.impact_propagation else 0}</div>
-                </div>
-            </div>
-        </div>
-        ''' if result.impact_propagation else ''}
+# REMOVED: Impact severity breakdown - Pure heuristic analysis removed
 
-        {f'''
-        <div class="section">
-            <h2>🔍 Risk Assessment</h2>
-            <div class="recommendations">
-                <h3>Overall Assessment</h3>
-                <p>{result.impact_propagation.risk_assessment if result.impact_propagation else 'No risk assessment available'}</p>
-            </div>
-        </div>
-        ''' if result.impact_propagation and result.impact_propagation.risk_assessment else ''}
+# REMOVED: Risk assessment section - Pure heuristic analysis removed
 
-        {f'''
-        <div class="section">
-            <h2>🚀 Deployment Recommendations</h2>
-            {"".join(f"<div class='recommendations'><strong>•</strong> {rec}</div>" for rec in result.impact_propagation.deployment_recommendations[:10])}
-            {f"<p>... and {len(result.impact_propagation.deployment_recommendations) - 10} more recommendations</p>" if result.impact_propagation and len(result.impact_propagation.deployment_recommendations) > 10 else ""}
-        </div>
-        ''' if result.impact_propagation and result.impact_propagation.deployment_recommendations else ''}
+# REMOVED: Deployment recommendations section - Pure heuristic analysis removed
 
-        {f'''
-        <div class="section">
-            <h2>👥 Coordination Required</h2>
-            {"".join(f"<div class='recommendations'><strong>•</strong> {coord}</div>" for coord in result.impact_propagation.coordination_needed[:5])}
-            {f"<p>... and {len(result.impact_propagation.coordination_needed) - 5} more coordination items</p>" if result.impact_propagation and len(result.impact_propagation.coordination_needed) > 5 else ""}
-        </div>
-        ''' if result.impact_propagation and result.impact_propagation.coordination_needed else ''}
+# REMOVED: Coordination needed section - Pure heuristic analysis removed
 
         <div class="section">
             <h2>📈 Analysis Details</h2>
