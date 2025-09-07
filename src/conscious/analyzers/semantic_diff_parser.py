@@ -65,7 +65,10 @@ class SemanticDiffParser:
         # Split diff into hunks
         hunks = self._split_into_hunks(diff_content)
 
-        for hunk in hunks:
+        # Filter hunks to only those belonging to the specified file
+        file_hunks = [hunk for hunk in hunks if hunk.file_path == file_path]
+
+        for hunk in file_hunks:
             hunk_changes = self._analyze_hunk(hunk, file_path)
             changes.extend(hunk_changes)
 

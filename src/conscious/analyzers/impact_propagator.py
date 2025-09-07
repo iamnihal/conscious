@@ -276,7 +276,8 @@ class ConfidenceScorer:
         confidence_score += change_clarity * self.factors['change_type_clarity']
 
         # Test coverage
-        confidence_score += test_coverage * self.factors['test_coverage']
+        if test_coverage is not None:
+            confidence_score += test_coverage * self.factors['test_coverage']
 
         # Historical patterns (simplified)
         historical_factor = 0.7  # Could be improved with ML model
