@@ -191,8 +191,9 @@ def _analyze_impact_basic(diff_file, output, format, call_graph, impact_analysis
 def _analyze_impact_advanced(diff_file, output, format, include_usage, include_dependencies,
                              analysis_depth, confidence_threshold, cache, cache_size, root_dir):
     """Advanced analysis mode using the comprehensive impact analysis system."""
-    console.print("🚀 [bold]Advanced Impact Analysis Mode[/bold]")
-    console.print("🔬 Using comprehensive analysis system...")
+    if format != 'json':
+        console.print("🚀 [bold]Advanced Impact Analysis Mode[/bold]")
+        console.print("🔬 Using comprehensive analysis system...")
 
     # Read the diff content
     with open(diff_file, 'r') as f:
@@ -220,11 +221,13 @@ def _analyze_impact_advanced(diff_file, output, format, include_usage, include_d
     python_files_normalized = [normalized_paths[i] for i, fp in enumerate(file_paths) if fp.endswith('.py') and (not root_dir or os.path.exists(fp))]
 
     if not python_files:
-        console.print("[yellow]⚠️  No Python files found in diff or they don't exist at specified paths[/yellow]")
-        console.print("💡 Try using --root-dir to specify the project root directory")
+        if format != 'json':
+            console.print("[yellow]⚠️  No Python files found in diff or they don't exist at specified paths[/yellow]")
+            console.print("💡 Try using --root-dir to specify the project root directory")
         return {}
 
-    console.print(f"📁 Analyzing {len(python_files)} Python files")
+    if format != 'json':
+        console.print(f"📁 Analyzing {len(python_files)} Python files")
 
     # Create analysis configuration
     config = AnalysisConfiguration(
@@ -238,30 +241,42 @@ def _analyze_impact_advanced(diff_file, output, format, include_usage, include_d
     # Initialize advanced analyzer
     analyzer = AdvancedImpactAnalyzer(config)
 
-    # Perform comprehensive analysis with progress tracking
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        console=console,
-    ) as progress:
-
-        task = progress.add_task("🔬 Running comprehensive impact analysis...", total=None)
-
+    # Perform comprehensive analysis
+    if format == 'json':
+        # Run without progress display for clean JSON output
         try:
             result = analyzer.analyze_impact(
                 diff_content=diff_content,
                 file_paths=python_files_normalized,  # Use normalized paths for semantic parsing
                 root_directory=root_dir or ""
             )
-
-            progress.update(task, completed=True, description="✅ Analysis complete!")
-
         except Exception as e:
-            progress.update(task, description=f"❌ Analysis failed: {str(e)}")
             raise
+    else:
+        # Run with progress display for other formats
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=console,
+        ) as progress:
+
+            task = progress.add_task("🔬 Running comprehensive impact analysis...", total=None)
+
+            try:
+                result = analyzer.analyze_impact(
+                    diff_content=diff_content,
+                    file_paths=python_files_normalized,  # Use normalized paths for semantic parsing
+                    root_directory=root_dir or ""
+                )
+
+                progress.update(task, completed=True, description="✅ Analysis complete!")
+
+            except Exception as e:
+                progress.update(task, description=f"❌ Analysis failed: {str(e)}")
+                raise
 
     # Display progress information
-    if result.progress:
+    if result.progress and format != 'json':
         elapsed = result.progress.elapsed_time
         phases = len(result.progress.completed_phases)
         console.print(".2f")
@@ -298,109 +313,472 @@ def _analyze_impact_advanced(diff_file, output, format, include_usage, include_d
         _display_advanced_text_results(result)
     return result
 
+# Simplified helper functions for clean JSON extraction
+
+def _get_imported_symbols_from_graph(import_graph, module_name, file_path):
+    """Extract imported symbols for a specific module from the import graph."""
+    if not import_graph or not hasattr(import_graph, 'edges'):
+        return []
+
+    # Look for edges where this module is imported in the specified file
+    for edge in import_graph.edges:
+        if (getattr(edge, 'from_file', '') == file_path and
+            getattr(edge, 'to_file', '').replace('.py', '').replace('/', '.') == module_name):
+            return getattr(edge, 'imported_symbols', [])
+
+    return []
+
+def _get_call_chains_from_graph(result):
+    """Extract call chains from dependency analysis."""
+    call_dependencies = []
+
+    # If we have call graph data, extract basic call relationships
+    if hasattr(result, 'call_graph') and result.call_graph:
+        for edge in getattr(result.call_graph, 'edges', []):
+            call_dependencies.append({
+                "caller": getattr(edge, 'source', ''),
+                "callee": getattr(edge, 'target', ''),
+                "call_chain": [getattr(edge, 'source', ''), getattr(edge, 'target', '')],
+                "chain_depth": 1
+            })
+
+    return call_dependencies[:10]  # Limit for safety
+
+def _get_class_instantiations_from_usage(usage_analysis):
+    """Extract class instantiation data from usage analysis."""
+    if not usage_analysis or not hasattr(usage_analysis, 'results'):
+        return []
+
+    instantiations = []
+    for symbol_name, usage_result in usage_analysis.results.items():
+        if hasattr(usage_result, 'usages'):
+            for usage in usage_result.usages:
+                # Look for class definitions (they appear as 'variable' type in usage analysis)
+                usage_type = getattr(usage, 'usage_type', '')
+                context = getattr(usage, 'context', '')
+
+                # Check if this is a class definition by looking for 'class ' in context
+                if usage_type == 'variable' and 'class ' in context and symbol_name in context:
+                    instantiations.append({
+                        "class_name": symbol_name,
+                        "file": getattr(usage, 'file_path', ''),
+                        "line_number": getattr(usage, 'line_number', 0),
+                        "assigned_to_variable": "",  # Not applicable for class definitions
+                        "constructor_called": False,  # This is class definition, not instantiation
+                        "context": _safe_json_string(context, 150)
+                    })
+
+    return instantiations[:10]  # Limit for safety
+
+def _get_attribute_access_from_usage(usage_analysis):
+    """Extract attribute access data from usage analysis."""
+    if not usage_analysis or not hasattr(usage_analysis, 'results'):
+        return []
+
+    access_patterns = []
+    for symbol_name, usage_result in usage_analysis.results.items():
+        if hasattr(usage_result, 'usages'):
+            for usage in usage_result.usages:
+                usage_type = getattr(usage, 'usage_type', '')
+                context = getattr(usage, 'context', '')
+
+                # Look for method calls or attribute access patterns
+                if usage_type == 'call' and ('self.' in context or '.' in symbol_name):
+                    access_patterns.append({
+                        "object_name": "self" if 'self.' in context else "unknown",
+                        "attribute_name": symbol_name,
+                        "file": getattr(usage, 'file_path', ''),
+                        "line_number": getattr(usage, 'line_number', 0),
+                        "access_type": "method_call",
+                        "context": _safe_json_string(context, 150)
+                    })
+
+    return access_patterns[:15]  # Limit for safety
+
+def _get_inheritance_relationships_from_mappings(element_mappings):
+    """Extract inheritance relationships from element mappings."""
+    if not element_mappings:
+        return []
+
+    relationships = []
+    for mapping in element_mappings:
+        if hasattr(mapping, 'mapped_elements'):
+            for elem in mapping.mapped_elements:
+                if getattr(elem, 'element_type', '') == 'class':
+                    # Look for parent class information in AST node if available
+                    parent_class = None
+                    if hasattr(elem, 'ast_node') and elem.ast_node:
+                        # Try to extract parent class from AST (this is basic implementation)
+                        parent_class = getattr(elem, 'parent_class', None)
+
+                    if parent_class:
+                        relationships.append({
+                            "parent_class": parent_class,
+                            "child_class": getattr(elem, 'name', ''),
+                            "file": getattr(elem, 'file_path', ''),
+                            "line_number": getattr(elem, 'start_line', 0),
+                            "methods_inherited": []  # Would need deeper AST analysis
+                        })
+
+    return relationships[:10]  # Limit for safety
+
+def _get_parent_class_relationships(element_mappings):
+    """Extract parent-child class relationships from element mappings."""
+    relationships = {}
+
+    if element_mappings:
+        for mapping in element_mappings:
+            if hasattr(mapping, 'mapped_elements'):
+                for elem in mapping.mapped_elements:
+                    if getattr(elem, 'element_type', '') == 'class':
+                        class_name = getattr(elem, 'name', '')
+                        file_path = getattr(elem, 'file_path', '')
+
+                        # Basic parent detection (would need AST analysis for accuracy)
+                        # For now, we'll use a simple heuristic or leave as None
+                        relationships[class_name] = None
+
+    return relationships
+
+def _safe_json_string(text, max_length=500):
+    """Safely prepare a string for JSON serialization."""
+    if not isinstance(text, str):
+        return ""
+
+    # Remove null bytes that can break JSON
+    text = text.replace('\x00', '')
+
+    # Normalize excessive whitespace
+    import re
+    text = re.sub(r'\s+', ' ', text.strip())
+
+    # Limit length to prevent bloated JSON
+    if len(text) > max_length:
+        text = text[:max_length] + "..."
+
+    return text
+
+def _extract_parameters_safely(signature, other_signature):
+    """Safely extract parameters that were added/removed between signatures."""
+    if not signature or not other_signature:
+        return []
+
+    try:
+        import re
+
+        # Extract parameter list from function signature
+        params_match = re.search(r'def\s+\w+\s*\((.*?)\)', signature.strip())
+        other_params_match = re.search(r'def\s+\w+\s*\((.*?)\)', other_signature.strip())
+
+        if not params_match:
+            return []
+
+        current_params = params_match.group(1).strip()
+        other_params = other_params_match.group(1).strip() if other_params_match else ""
+
+        # Parse parameter names (basic implementation)
+        current_param_names = _parse_parameter_names(current_params)
+        other_param_names = _parse_parameter_names(other_params)
+
+        # Find differences
+        added = [p for p in current_param_names if p not in other_param_names]
+        return added
+
+    except Exception:
+        # If parsing fails, return empty list (safe fallback)
+        return []
+
+def _parse_parameter_names(params_str):
+    """Parse parameter names from a parameter string."""
+    if not params_str or params_str.strip() == "":
+        return []
+
+    try:
+        import re
+
+        # Split by comma and extract parameter names
+        param_list = []
+        for param in params_str.split(','):
+            param = param.strip()
+            if param:
+                # Remove type hints and default values
+                param_name = re.split(r'[=:]', param)[0].strip()
+                if param_name and not param_name.startswith('*'):
+                    param_list.append(param_name)
+
+        return param_list
+
+    except Exception:
+        return []
+
 def _output_pure_facts_json(result: ComprehensiveAnalysisResult, output):
-    """Output pure factual data in JSON format for LLM consumption - NO heuristics or inferences."""
+    """Output comprehensive factual data in LLM-optimized JSON format following output_format.json structure."""
+    import json
     import time
 
-    # Extract ONLY pure facts - no severity levels, confidence scores, risk assessments, or recommendations
+    # Build comprehensive JSON structure based on output_format.json
     facts_data = {
         "analysis_metadata": {
             "tool_version": "2.0",
-            "timestamp": time.time(),
-            "analysis_type": "code_change_impact",
-            "processing_duration_ms": result.performance_metrics.get('total_analysis_time', 0) * 1000 if result.performance_metrics else 0
+            "timestamp": int(time.time()),
+            "processing_duration_ms": result.performance_metrics.get('total_analysis_time', 0) * 1000 if result.performance_metrics else 0,
+            "files_analyzed": len(set(getattr(c, 'file_path', '') for c in (result.semantic_changes or []) if getattr(c, 'file_path', ''))),
+            "lines_analyzed": result.performance_metrics.get('total_lines_processed', 0) if result.performance_metrics else 0
         },
 
-        "observed_code_changes": {
-            "semantic_changes": [
+        "code_changes": {
+            "functions_modified": [
                 {
-                    "change_type": change.change_type.value if hasattr(change.change_type, 'value') else str(change.change_type),
-                    "element_name": change.element_name,
-                    "file_path": getattr(change, 'file_path', None),
-                    "line_number": getattr(change, 'line_number', None),
-                    "old_content": change.old_content,
-                    "new_content": change.new_content
-                } for change in (result.semantic_changes or [])
-            ],
+                    "name": getattr(change, 'element_name', ''),
+                    "file": getattr(change, 'file_path', ''),
+                    "line_start": getattr(change, 'line_number', 0),
+                    "line_end": getattr(change, 'line_number', 0) + 5,  # Estimate end line
+                    "old_signature": _safe_json_string(getattr(change, 'old_content', '')),
+                    "new_signature": _safe_json_string(getattr(change, 'new_content', '')),
+                    "parameters_added": _extract_parameters_safely(
+                        _safe_json_string(getattr(change, 'new_content', '')),
+                        _safe_json_string(getattr(change, 'old_content', ''))
+                    ),
+                    "parameters_removed": _extract_parameters_safely(
+                        _safe_json_string(getattr(change, 'old_content', '')),
+                        _safe_json_string(getattr(change, 'new_content', ''))
+                    ),
+                    "return_type_changed": False,
+                    "change_type": getattr(change.change_type, 'name', 'unknown').lower() if hasattr(change, 'change_type') and hasattr(change.change_type, 'name') else 'unknown'
+                }
+                for change in (result.semantic_changes or [])
+                if getattr(change, 'change_type', '') and hasattr(change.change_type, 'name') and
+                   change.change_type.name in ('FUNCTION_SIGNATURE', 'FUNCTION_LOGIC')
+            ][:20],  # Limit for safety
 
-            "code_elements_mapped": [
+            "classes_modified": [
+                {
+                    "name": getattr(change, 'element_name', ''),
+                    "file": getattr(change, 'file_path', ''),
+                    "line_start": getattr(change, 'line_number', 0),
+                    "line_end": getattr(change, 'line_number', 0) + 20,  # Estimate end line
+                    "methods_added": [],
+                    "methods_removed": [],
+                    "methods_modified": [],
+                    "attributes_added": [],
+                    "change_type": getattr(change.change_type, 'name', 'unknown').lower() if hasattr(change, 'change_type') and hasattr(change.change_type, 'name') else 'unknown'
+                }
+                for change in (result.semantic_changes or [])
+                if getattr(change, 'change_type', '') and hasattr(change.change_type, 'name') and
+                   change.change_type.name in ('CLASS_DEFINITION', 'CLASS_MODIFICATION')
+            ][:10],  # Limit for safety
+
+            "imports_modified": {
+                "imports_added": [
+                    {
+                        "module": getattr(change, 'element_name', ''),
+                        "imported_names": _get_imported_symbols_from_graph(result.import_graph, getattr(change, 'element_name', ''), getattr(change, 'file_path', '')),
+                        "import_type": "from_import" if "." in getattr(change, 'element_name', '') else "absolute_import",
+                        "file": getattr(change, 'file_path', ''),
+                        "line_number": getattr(change, 'line_number', 0)
+                    }
+                    for change in (result.semantic_changes or [])
+                    if getattr(change, 'change_type', '') and hasattr(change.change_type, 'name') and
+                       'IMPORT' in change.change_type.name and 'ADDED' in change.change_type.name
+                ][:10],
+
+                "imports_removed": [
+                    {
+                        "module": getattr(change, 'element_name', ''),
+                        "imported_names": _get_imported_symbols_from_graph(result.import_graph, getattr(change, 'element_name', ''), getattr(change, 'file_path', '')),
+                        "file": getattr(change, 'file_path', ''),
+                        "line_number": getattr(change, 'line_number', 0)
+                    }
+                    for change in (result.semantic_changes or [])
+                    if getattr(change, 'change_type', '') and hasattr(change.change_type, 'name') and
+                       'IMPORT' in change.change_type.name and 'REMOVED' in change.change_type.name
+                ][:10]
+            },
+
+            "variables_modified": [
+                {
+                    "name": getattr(change, 'element_name', ''),
+                    "file": getattr(change, 'file_path', ''),
+                    "old_value": _safe_json_string(getattr(change, 'old_content', ''), 100),
+                    "new_value": _safe_json_string(getattr(change, 'new_content', ''), 100),
+                    "line_number": getattr(change, 'line_number', 0),
+                    "change_type": "value_change"
+                }
+                for change in (result.semantic_changes or [])
+                if getattr(change, 'change_type', '') and hasattr(change.change_type, 'name') and
+                   'VARIABLE' in change.change_type.name
+            ][:10],
+
+            "files_affected": {
+                "modified": list(set(getattr(c, 'file_path', '') for c in (result.semantic_changes or []) if getattr(c, 'file_path', ''))),
+                "added": [],
+                "removed": []
+            }
+        },
+
+        "usage_analysis": {
+            "function_calls": [
+                {
+                    "caller_function": getattr(usage, 'function_name', 'unknown'),
+                    "caller_file": getattr(usage, 'file_path', ''),
+                    "callee_function": getattr(usage, 'function_name', 'unknown'),
+                    "callee_file": getattr(usage, 'file_path', ''),
+                    "line_number": getattr(usage, 'line_number', 0),
+                    "call_type": getattr(usage, 'usage_type', 'direct_call'),
+                    "parameters_used": [],
+                    "in_context": _safe_json_string(getattr(usage, 'context', ''), 200)
+                }
+                for usage in (result.usage_analysis.results.values() if result.usage_analysis and hasattr(result.usage_analysis, 'results') else [])
+                for usage_item in (getattr(usage, 'usages', []) if hasattr(usage, 'usages') else [])
+            ][:30],  # Limit for safety
+
+            "class_instantiations": _get_class_instantiations_from_usage(result.usage_analysis),
+            "attribute_access": _get_attribute_access_from_usage(result.usage_analysis),
+            "inheritance_relationships": _get_inheritance_relationships_from_mappings(result.element_mappings),
+
+            "usage_summary": {
+                func_name: {
+                    "total_calls": getattr(usage_result, 'total_usages', 0),
+                    "files_using": list(set(getattr(u, 'file_path', '') for u in getattr(usage_result, 'usages', []))),
+                    "most_used_in": getattr(usage_result, 'most_used_in', ''),
+                    "usage_patterns": ["direct_call"]
+                }
+                for func_name, usage_result in (result.usage_analysis.results.items() if result.usage_analysis and hasattr(result.usage_analysis, 'results') else [])
+            }
+        },
+
+        "dependency_analysis": {
+            "import_dependencies": [
+                {
+                    "from_file": getattr(edge, 'from_file', ''),
+                    "to_module": getattr(edge, 'to_file', '').replace('.py', '').replace('/', '.'),
+                    "import_type": getattr(edge, 'import_type', 'absolute_import'),
+                    "imported_symbols": getattr(edge, 'imported_symbols', [])
+                }
+                for edge in (result.import_graph.edges if result.import_graph else [])
+            ][:20],  # Limit for safety
+
+            "call_dependencies": _get_call_chains_from_graph(result),
+
+            "module_dependencies": {
+                module_path: {
+                    "depends_on": [getattr(edge, 'to_file', '') for edge in getattr(node, 'imports', [])],
+                    "depended_by": [getattr(edge, 'from_file', '') for edge in getattr(node, 'imported_by', [])],
+                    "dependency_depth": 1
+                }
+                for module_path, node in (result.import_graph.nodes.items() if result.import_graph else [])
+            },
+
+            "circular_dependencies": getattr(result.import_graph, 'cycles', []) if result.import_graph else [],
+
+            "impact_scope": {
+                "directly_affected_files": list(set(getattr(c, 'file_path', '') for c in (result.semantic_changes or []) if getattr(c, 'file_path', ''))),
+                "indirectly_affected_files": [],  # Can be calculated from dependencies
+                "affected_symbols": list(set(getattr(c, 'element_name', '') for c in (result.semantic_changes or []) if getattr(c, 'element_name', ''))),
+                "propagation_paths": []  # Can be calculated from dependency analysis
+            }
+        },
+
+        "code_structure": {
+            "element_mappings": [
                 {
                     "element_type": getattr(elem, 'element_type', 'unknown'),
-                    "name": getattr(elem, 'name', 'unknown'),
-                    "file_path": getattr(elem, 'file_path', None),
-                    "line_start": getattr(elem, 'start_line', None),
-                    "line_end": getattr(elem, 'end_line', None)
-                } for mapping in (result.element_mappings or [])
-                for elem in (mapping.mapped_elements or [])
-            ],
-
-            "change_categories": [
-                {
-                    "category": getattr(classification.category, 'value', str(classification.category)),
-                    "affected_elements": classification.affected_elements or []
-                } for classification in (result.change_classifications or [])
-            ]
-        },
-
-        "codebase_structure_observed": {
-            "files_processed": list(set(
-                [getattr(change, 'file_path', None) for change in (result.semantic_changes or []) if getattr(change, 'file_path', None)] +
-                [getattr(elem, 'file_path', None) for mapping in (result.element_mappings or []) for elem in (mapping.mapped_elements or []) if getattr(elem, 'file_path', None)]
-            )),
-
-            "import_statements_found": [
-                {
-                    "module_name": getattr(node, 'name', str(node)),
-                    "source_file": getattr(node, 'file_path', None),
-                    "import_type": "module_import"
-                } for node in (result.import_graph.nodes.values() if result.import_graph else [])
-            ] if result.import_graph else [],
-
-            "function_usage_locations": [
-                {
-                    "function_name": getattr(usage, 'function_name', 'unknown'),
-                    "usage_file": getattr(usage, 'file_path', None),
-                    "line_number": getattr(usage, 'line_number', None),
-                    "usage_context": getattr(usage, 'context', None)
-                } for usage in (result.usage_analysis.results if result.usage_analysis and hasattr(result.usage_analysis, 'results') else [])
-            ] if result.usage_analysis else []
-        },
-
-        "factual_impact_observations": {
-            "files_with_changes": list(set([
-                getattr(change, 'file_path', None)
-                for change in (result.semantic_changes or [])
-                if getattr(change, 'file_path', None)
-            ])),
-
-            "symbols_changed": list(set([
-                getattr(change, 'element_name', None)
-                for change in (result.semantic_changes or [])
-                if getattr(change, 'element_name', None)
-            ])),
-
-            "element_types_affected": list(set([
-                getattr(elem, 'element_type', 'unknown')
+                    "name": getattr(elem, 'name', ''),
+                    "file": getattr(elem, 'file_path', ''),
+                    "line_start": getattr(elem, 'start_line', 0),
+                    "line_end": getattr(elem, 'end_line', 0),
+                    "parent_element": _get_parent_class_relationships(result.element_mappings).get(getattr(elem, 'name', ''), None),
+                    "visibility": "public"
+                }
                 for mapping in (result.element_mappings or [])
-                for elem in (mapping.mapped_elements or [])
-            ]))
+                for elem in (getattr(mapping, 'mapped_elements', []) if hasattr(mapping, 'mapped_elements') else [])
+            ][:50],  # Limit for safety
+
+            "file_structure": [
+                {
+                    "file": file_path,
+                    "functions_count": sum(1 for m in (result.element_mappings or [])
+                                         for e in getattr(m, 'mapped_elements', [])
+                                         if getattr(e, 'file_path', '') == file_path
+                                         and getattr(e, 'element_type', '') == 'function'),
+                    "classes_count": sum(1 for m in (result.element_mappings or [])
+                                       for e in getattr(m, 'mapped_elements', [])
+                                       if getattr(e, 'file_path', '') == file_path
+                                       and getattr(e, 'element_type', '') == 'class'),
+                    "imports_count": len([edge for edge in (result.import_graph.edges if result.import_graph else [])
+                                        if getattr(edge, 'from_file', '') == file_path]),
+                    "total_lines": 0
+                }
+                for file_path in set(getattr(e, 'file_path', '') for m in (result.element_mappings or [])
+                                   for e in getattr(m, 'mapped_elements', []) if getattr(e, 'file_path', ''))
+            ][:10]
         },
 
-        "quantitative_facts": {
-            "semantic_changes_count": len(result.semantic_changes) if result.semantic_changes else 0,
-            "code_elements_mapped_count": len(result.element_mappings) if result.element_mappings else 0,
-            "change_classifications_count": len(result.change_classifications) if result.change_classifications else 0,
-            "files_processed_count": len(result.import_graph.nodes) if result.import_graph else 0,
-            "function_usage_locations_count": len(result.usage_analysis.results) if result.usage_analysis and hasattr(result.usage_analysis, 'results') else 0
+        "change_classifications": [
+            {
+                "category": str(getattr(classification, 'category', '')).split('.')[-1],
+                "affected_elements": getattr(classification, 'affected_elements', []),
+                "change_scope": "local"
+            }
+            for classification in (result.change_classifications or [])
+        ],
+
+        "quantitative_metrics": {
+            "change_counts": {
+                "functions_modified": len([c for c in (result.semantic_changes or []) if 'function' in str(getattr(c, 'change_type', ''))]),
+                "classes_modified": len([c for c in (result.semantic_changes or []) if 'class' in str(getattr(c, 'change_type', ''))]),
+                "imports_added": len([c for c in (result.semantic_changes or []) if 'import' in str(getattr(c, 'change_type', '')) and 'added' in str(getattr(c, 'change_type', ''))]),
+                "imports_removed": len([c for c in (result.semantic_changes or []) if 'import' in str(getattr(c, 'change_type', '')) and 'removed' in str(getattr(c, 'change_type', ''))]),
+                "variables_modified": len([c for c in (result.semantic_changes or []) if 'variable' in str(getattr(c, 'change_type', ''))]),
+                "files_affected": len(set(getattr(c, 'file_path', '') for c in (result.semantic_changes or []) if getattr(c, 'file_path', '')))
+            },
+
+            "usage_counts": {
+                "total_function_calls": sum(len(getattr(usage, 'usages', [])) for usage in (result.usage_analysis.results.values() if result.usage_analysis and hasattr(result.usage_analysis, 'results') else [])),
+                "total_class_instantiations": len(_get_class_instantiations_from_usage(result.usage_analysis)),
+                "total_attribute_accesses": len(_get_attribute_access_from_usage(result.usage_analysis)),
+                "unique_symbols_used": len(result.usage_analysis.results) if result.usage_analysis and hasattr(result.usage_analysis, 'results') else 0
+            },
+
+            "dependency_counts": {
+                "total_import_relationships": len(result.import_graph.edges) if result.import_graph else 0,
+                "total_call_dependencies": len(_get_call_chains_from_graph(result)),
+                "max_dependency_depth": 1,    # Can be calculated from dependency analysis
+                "circular_dependencies": len(getattr(result.import_graph, 'cycles', [])) if result.import_graph else 0
+            },
+
+            "code_metrics": {
+                "total_files": len(set(getattr(e, 'file_path', '') for m in (result.element_mappings or [])
+                                     for e in getattr(m, 'mapped_elements', []) if getattr(e, 'file_path', ''))),
+                "total_functions": sum(1 for m in (result.element_mappings or [])
+                                     for e in getattr(m, 'mapped_elements', [])
+                                     if getattr(e, 'element_type', '') == 'function'),
+                "total_classes": sum(1 for m in (result.element_mappings or [])
+                                   for e in getattr(m, 'mapped_elements', [])
+                                   if getattr(e, 'element_type', '') == 'class'),
+                "total_lines_of_code": result.performance_metrics.get('total_lines_processed', 0) if result.performance_metrics else 0
+            }
         }
     }
 
-    import json
-    json_output = json.dumps(facts_data, indent=2, default=str, ensure_ascii=False)
+    # Clean JSON output with proper error handling
+    try:
+        json_output = json.dumps(facts_data, indent=2, ensure_ascii=False, default=str)
+    except Exception as e:
+        # Fallback to basic JSON if there are serialization issues
+        facts_data = {
+            "error": "JSON serialization issue",
+            "basic_info": {
+                "total_changes": len(result.semantic_changes) if result.semantic_changes else 0,
+                "files_affected": len(set(getattr(c, 'file_path', '') for c in (result.semantic_changes or []) if getattr(c, 'file_path', '')))
+            }
+        }
+        json_output = json.dumps(facts_data, indent=2)
 
     if output:
         Path(output).write_text(json_output)
-        console.print(f"📄 Pure factual analysis saved to {output}")
+        if format != 'json':  # Don't show console output when format is JSON
+            console.print(f"📄 Pure factual analysis saved to {output}")
     else:
         console.print(json_output)
 
